@@ -1,12 +1,9 @@
+import glob
+
 from pyspark.sql import SparkSession
 
-from config.settings import (
-    POSTGRES_HOST,
-    POSTGRES_PORT,
-    POSTGRES_DB,
-    POSTGRES_USER,
-    POSTGRES_PASSWORD,
-)
+from config.settings import BRONZE_DIR
+from etl.schema import trade_schema
 
 
 class BronzeReader:
@@ -17,27 +14,26 @@ class BronzeReader:
             SparkSession.builder
             .master("local[*]")
             .appName("Binance ETL")
-            .config(
-                "spark.jars.packages",
-                "org.postgresql:postgresql:42.7.8"
-            )
             .getOrCreate()
         )
 
     def read(self):
 
-        jdbc_url = (
-            f"jdbc:postgresql://"
-            f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+        files = glob.glob(
+            str(BRONZE_DIR / "*.jsonl")
+        )
+
+        if not files:
+            raise FileNotFoundError(
+                f"No Bronze files found in {BRONZE_DIR}"
+            )
+
+        print(
+            f"Reading {len(files)} raw Bronze files..."
         )
 
         return (
             self.spark.read
-            .format("jdbc")
-            .option("url", jdbc_url)
-            .option("dbtable", "bronze.trades")
-            .option("user", POSTGRES_USER)
-            .option("password", POSTGRES_PASSWORD)
-            .option("driver", "org.postgresql.Driver")
-            .load()
+            .schema(trade_schema)
+            .json(files)
         )

@@ -1,83 +1,44 @@
-# import json
-# import os
-# from datetime import datetime
+import json
+import os
+from datetime import datetime, timezone
 
-
-# class BronzeWriter:
-
-#     def __init__(self, folder):
-
-#         self.folder = folder
-
-#         os.makedirs(folder, exist_ok=True)
-
-#     def save(self, records):
-
-#         if not records:
-#             return
-
-#         filename = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-#         tmp = os.path.join(
-#             self.folder,
-#             filename + ".tmp"
-#         )
-
-#         final = os.path.join(
-#             self.folder,
-#             filename + ".json"
-#         )
-
-#         with open(tmp, "w") as f:
-#             json.dump(records, f)
-
-#         os.replace(tmp, final)
-
-#         print("Saved", final)
-from db.postgres import get_connection
+from config.settings import BRONZE_DIR
 
 
 class BronzeWriter:
 
-    def save(self, records):
+    def __init__(self):
+        self.folder = BRONZE_DIR
+        os.makedirs(self.folder, exist_ok=True)
 
+    def save(self, records):
         if not records:
             return
 
-        with get_connection() as conn:
+        timestamp = datetime.now(timezone.utc).strftime(
+            "%Y%m%d_%H%M%S_%f"
+        )
 
-            with conn.cursor() as cur:
+        tmp_file = os.path.join(
+            self.folder,
+            f"{timestamp}.tmp"
+        )
 
-                for record in records:
+        final_file = os.path.join(
+            self.folder,
+            f"{timestamp}.jsonl"
+        )
 
-                    cur.execute(
-                        """
-                        INSERT INTO bronze.trades (
-                            trade_id,
-                            event_time,
-                            symbol,
-                            price,
-                            quantity,
-                            buyer_maker
-                        )
-                        VALUES (
-                            %s,
-                            to_timestamp(%s / 1000.0),
-                            %s,
-                            %s,
-                            %s,
-                            %s
-                        )
-                        ON CONFLICT (trade_id) DO NOTHING
-                        """,
-                        (
-                            record["trade_id"],
-                            record["event_time"],
-                            record["symbol"],
-                            record["price"],
-                            record["quantity"],
-                            record["is_buyer_maker"],
-                        ),
-                    )
+        # JSON Lines:
+        # mỗi dòng = một raw event
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record) + "\n")
 
-        print(f"Saved {len(records)} records to PostgreSQL")
+        # Atomic rename
+        os.replace(tmp_file, final_file)
+
+        print(
+            f"Saved {len(records)} records to raw Bronze: "
+            f"{final_file}"
+        )

@@ -1,11 +1,17 @@
-from pyspark.sql.types import *
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    LongType,
+    StringType,
+    BooleanType,
+)
+
 
 trade_schema = StructType([
-    StructField("e", StringType(), True),
-    StructField("E", LongType(), True),
-    StructField("s", StringType(), True),
-    StructField("p", StringType(), True),
-    StructField("q", StringType(), True),
-    StructField("t", LongType(), True),
-    StructField("T", LongType(), True),
+    StructField("trade_id", LongType(), True),
+    StructField("event_time", LongType(), True),
+    StructField("symbol", StringType(), True),
+    StructField("price", StringType(), True),
+    StructField("quantity", StringType(), True),
+    StructField("is_buyer_maker", BooleanType(), True),
 ])

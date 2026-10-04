@@ -9,17 +9,20 @@ from config.settings import (
 import psycopg
 
 
-class SilverWriter:
-    STAGING_TABLE = "silver.trades_staging"
-    TARGET_TABLE = "silver.trades"
+class BronzeWriter:
+
+    STAGING_TABLE = "bronze.trades_staging"
+    TARGET_TABLE = "bronze.trades"
 
     def __init__(self):
+
         self.jdbc_url = (
             f"jdbc:postgresql://"
             f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
         )
 
     def _get_connection(self):
+
         return psycopg.connect(
             host=POSTGRES_HOST,
             port=POSTGRES_PORT,
@@ -29,31 +32,35 @@ class SilverWriter:
         )
 
     def _create_staging_table(self):
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS silver.trades_staging (
+                    CREATE TABLE IF NOT EXISTS bronze.trades_staging (
                         trade_id BIGINT PRIMARY KEY,
                         event_time TIMESTAMPTZ NOT NULL,
                         symbol VARCHAR(20) NOT NULL,
                         price NUMERIC(20, 8) NOT NULL,
                         quantity NUMERIC(20, 8) NOT NULL,
-                        buyer_maker BOOLEAN,
-                        trade_value NUMERIC(30, 8) NOT NULL,
-                        trade_date DATE NOT NULL
+                        buyer_maker BOOLEAN
                     );
                 """)
 
     def _clear_staging(self):
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+
                 cur.execute(
                     f"TRUNCATE TABLE {self.STAGING_TABLE};"
                 )
 
     def _merge_to_target(self):
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+
                 cur.execute(f"""
                     INSERT INTO {self.TARGET_TABLE} (
                         trade_id,
@@ -61,9 +68,7 @@ class SilverWriter:
                         symbol,
                         price,
                         quantity,
-                        buyer_maker,
-                        trade_value,
-                        trade_date
+                        buyer_maker
                     )
                     SELECT
                         trade_id,
@@ -71,21 +76,17 @@ class SilverWriter:
                         symbol,
                         price,
                         quantity,
-                        buyer_maker,
-                        trade_value,
-                        trade_date
+                        buyer_maker
                     FROM {self.STAGING_TABLE}
                     ON CONFLICT (trade_id) DO NOTHING;
                 """)
 
-    def save(self, df):
-        # 1. Make sure staging table exists
+    def write(self, df):
+
         self._create_staging_table()
 
-        # 2. Clear previous staging data
         self._clear_staging()
 
-        # 3. Spark writes transformed data into staging
         (
             df.write
             .format("jdbc")
@@ -98,10 +99,10 @@ class SilverWriter:
             .save()
         )
 
-        # 4. Merge staging → final
         self._merge_to_target()
 
-        # 5. Clean staging
         self._clear_staging()
 
-        print("Silver data written to PostgreSQL")
+        print(
+            "Bronze data written to PostgreSQL"
+        )
