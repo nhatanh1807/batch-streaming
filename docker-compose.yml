@@ -44,6 +44,16 @@ services:
       - "5050:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+  
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: batch-streaming:latest
+    container_name: batch-streaming-consumer
+    volumes:
+      - ./data:/app/data
+    command: ["python", "main_consumer.py"]
 
 volumes:
   postgres_data:

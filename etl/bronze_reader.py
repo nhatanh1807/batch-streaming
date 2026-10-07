@@ -14,6 +14,10 @@ class BronzeReader:
             SparkSession.builder
             .master("local[*]")
             .appName("Binance ETL")
+            .config(
+                "spark.jars",
+                "/opt/jdbc/postgresql-42.7.8.jar"
+            )
             .getOrCreate()
         )
 
