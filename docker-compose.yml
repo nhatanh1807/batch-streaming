@@ -51,8 +51,13 @@ services:
       dockerfile: Dockerfile
     image: batch-streaming:latest
     container_name: batch-streaming-consumer
+    environment:
+      AWS_PROFILE: default
+      AWS_REGION: ap-southeast-1
+      S3_BUCKET: batch-streaming-bronze
+      S3_RAW_PREFIX: raw/binance/trades
     volumes:
-      - ./data:/app/data
+      - ${HOME}/.aws:/root/.aws
     command: ["python", "main_consumer.py"]
 
 volumes:

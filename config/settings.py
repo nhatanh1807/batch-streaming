@@ -19,3 +19,8 @@ POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
 POSTGRES_DB = os.getenv("POSTGRES_DB", "batch_streaming")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
+
+# AWS S3
+S3_BUCKET = os.getenv("S3_BUCKET", "batch-streaming-bronze")
+S3_RAW_PREFIX = os.getenv("S3_RAW_PREFIX", "raw/binance/trades")
+AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
