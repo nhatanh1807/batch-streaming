@@ -28,8 +28,13 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
+      AWS_PROFILE: batch-streaming
+      AWS_REGION: ap-southeast-1
+      S3_BUCKET: batch-streaming-bronze
+      S3_RAW_PREFIX: raw/binance/trades
     volumes:
       - ./data:/app/data
+      - ${HOME}/.aws:/root/.aws:ro
 
   pgadmin:
     image: dpage/pgadmin4
@@ -44,7 +49,7 @@ services:
       - "5050:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-  
+
   consumer:
     build:
       context: .
@@ -52,12 +57,12 @@ services:
     image: batch-streaming:latest
     container_name: batch-streaming-consumer
     environment:
-      AWS_PROFILE: default
+      AWS_PROFILE: batch-streaming
       AWS_REGION: ap-southeast-1
       S3_BUCKET: batch-streaming-bronze
       S3_RAW_PREFIX: raw/binance/trades
     volumes:
-      - ${HOME}/.aws:/root/.aws
+      - ${HOME}/.aws:/root/.aws:ro
     command: ["python", "main_consumer.py"]
 
 volumes:
