@@ -47,12 +47,19 @@ class BronzeWriter:
                 """)
 
 
-    def _clear_staging(self):
+    def _create_staging_table(self):
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"TRUNCATE TABLE {self.STAGING_TABLE};"
-                )
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS bronze.trades_staging (
+                        trade_id BIGINT PRIMARY KEY,
+                        event_time_ms BIGINT NOT NULL,
+                        symbol VARCHAR(20) NOT NULL,
+                        price VARCHAR(50) NOT NULL,
+                        quantity VARCHAR(50) NOT NULL,
+                        buyer_maker BOOLEAN
+                    );
+                """)
 
     def _merge_to_target(self):
         with self._get_connection() as conn:
