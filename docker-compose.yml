@@ -64,7 +64,67 @@ services:
     volumes:
       - ${HOME}/.aws:/root/.aws:ro
     command: ["python", "main_consumer.py"]
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    image: batch-streaming-airflow:latest
+    container_name: batch-streaming-airflow-init
+    depends_on:
+      - postgres
+    environment: &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ""
+    command: db migrate
+    restart: "no"
 
+  airflow-webserver:
+    image: batch-streaming-airflow:latest
+    container_name: batch-streaming-airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-common-env
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.aws:/root/.aws:ro
+    command: >
+      bash -c "airflow users create
+      --username admin
+      --password admin
+      --firstname Airflow
+      --lastname Admin
+      --role Admin
+      --email admin@example.com || true;
+      exec airflow webserver"
+
+  airflow-scheduler:
+    image: batch-streaming-airflow:latest
+    container_name: batch-streaming-airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-common-env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.aws:/root/.aws:ro
+    command: scheduler
 volumes:
   postgres_data:
   pgadmin_data:

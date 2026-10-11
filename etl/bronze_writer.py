@@ -60,6 +60,12 @@ class BronzeWriter:
                         buyer_maker BOOLEAN
                     );
                 """)
+    def _clear_staging(self):
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"TRUNCATE TABLE {self.STAGING_TABLE};"
+                )
 
     def _merge_to_target(self):
         with self._get_connection() as conn:
