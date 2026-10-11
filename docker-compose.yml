@@ -81,6 +81,7 @@ services:
     restart: "no"
 
   airflow-webserver:
+    user: "0:0"
     image: batch-streaming-airflow:latest
     container_name: batch-streaming-airflow-webserver
     restart: unless-stopped
@@ -97,7 +98,7 @@ services:
       - "8080:8080"
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOME}/.aws:/root/.aws:ro
     command: >
@@ -111,6 +112,7 @@ services:
       exec airflow webserver"
 
   airflow-scheduler:
+    user: "0:0"
     image: batch-streaming-airflow:latest
     container_name: batch-streaming-airflow-scheduler
     restart: unless-stopped
@@ -121,10 +123,11 @@ services:
       <<: *airflow-common-env
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOME}/.aws:/root/.aws:ro
     command: scheduler
 volumes:
   postgres_data:
   pgadmin_data:
+  airflow_logs:
