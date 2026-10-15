@@ -28,7 +28,7 @@ with DAG(
         mount_tmp_dir=False,
         mounts=[
             Mount(
-                source="/home/alva_ngo/.aws",
+                source="/home/anhnguyen/.aws",
                 target="/root/.aws",
                 type="bind",
                 read_only=True,
