@@ -1,5 +1,5 @@
-services:
 
+services:
   postgres:
     image: postgres:16
     container_name: batch-streaming-postgres
@@ -26,15 +26,18 @@ services:
       POSTGRES_DB: batch_streaming
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_PORT: 5432
+      POSTGRES_PORT: "5432"
       POSTGRES_USER: postgres
-      AWS_PROFILE: batch-streaming
+      AWS_PROFILE: ${AWS_PROFILE:-batch-streaming}
       AWS_REGION: ap-southeast-1
       S3_BUCKET: batch-streaming-bronze
       S3_RAW_PREFIX: raw/binance/trades
     volumes:
       - ./data:/app/data
-      - ${HOME}/.aws:/root/.aws:ro
+      - type: bind
+        source: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
+        target: /root/.aws
+        read_only: true
 
   pgadmin:
     image: dpage/pgadmin4
@@ -56,14 +59,19 @@ services:
       dockerfile: Dockerfile
     image: batch-streaming:latest
     container_name: batch-streaming-consumer
+    restart: unless-stopped
     environment:
-      AWS_PROFILE: batch-streaming
+      AWS_PROFILE: ${AWS_PROFILE:-batch-streaming}
       AWS_REGION: ap-southeast-1
       S3_BUCKET: batch-streaming-bronze
       S3_RAW_PREFIX: raw/binance/trades
     volumes:
-      - ${HOME}/.aws:/root/.aws:ro
+      - type: bind
+        source: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
+        target: /root/.aws
+        read_only: true
     command: ["python", "main_consumer.py"]
+
   airflow-init:
     build:
       context: .
@@ -90,6 +98,8 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *airflow-common-env
+      AWS_HOST_DIR: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
+      AWS_PROFILE: ${AWS_PROFILE:-batch-streaming}
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       _AIRFLOW_WWW_USER_USERNAME: admin
@@ -100,7 +110,10 @@ services:
       - ./dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.aws:/root/.aws:ro
+      - type: bind
+        source: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
+        target: /root/.aws
+        read_only: true
     command: >
       bash -c "airflow users create
       --username admin
@@ -121,12 +134,18 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *airflow-common-env
+      AWS_HOST_DIR: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
+      AWS_PROFILE: ${AWS_PROFILE:-batch-streaming}
     volumes:
       - ./dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.aws:/root/.aws:ro
+      - type: bind
+        source: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
+        target: /root/.aws
+        read_only: true
     command: scheduler
+
 volumes:
   postgres_data:
   pgadmin_data:

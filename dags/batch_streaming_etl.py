@@ -1,8 +1,20 @@
+
+import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
+
+
+AWS_HOST_DIR = os.environ.get("AWS_HOST_DIR")
+AWS_PROFILE = os.environ.get("AWS_PROFILE", "batch-streaming")
+
+if not AWS_HOST_DIR:
+    raise ValueError(
+        "AWS_HOST_DIR is missing. Please configure it in the project .env "
+        "and pass it to airflow-scheduler in docker-compose.yml."
+    )
 
 
 with DAG(
@@ -28,7 +40,7 @@ with DAG(
         mount_tmp_dir=False,
         mounts=[
             Mount(
-                source="/home/anhnguyen/.aws",
+                source=AWS_HOST_DIR,
                 target="/root/.aws",
                 type="bind",
                 read_only=True,
@@ -40,7 +52,7 @@ with DAG(
             "POSTGRES_DB": "batch_streaming",
             "POSTGRES_USER": "postgres",
             "POSTGRES_PASSWORD": "postgres",
-            "AWS_PROFILE": "batch-streaming",
+            "AWS_PROFILE": AWS_PROFILE,
             "AWS_REGION": "ap-southeast-1",
             "S3_BUCKET": "batch-streaming-bronze",
             "S3_RAW_PREFIX": "raw/binance/trades",

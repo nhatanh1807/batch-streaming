@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
-
+import os 
+from etl.object_filter import select_objects
 import boto3
 import psycopg
 from pyspark.sql import SparkSession
@@ -91,19 +92,38 @@ class BronzeReader:
 
         return objects
 
+    
     def read(self):
-        """Download only new or changed S3 objects."""
+        """Download new/changed S3 objects or objects selected for backfill."""
         processed = self._get_processed_objects()
         all_objects = self._list_raw_objects()
 
-        self.pending_objects = [
-            obj
-            for obj in all_objects
-            if processed.get(obj["object_key"]) != obj["etag"]
-        ]
+        # Backfill settings are optional.
+        start_date = os.getenv("BACKFILL_START_DATE") or None
+        end_date = os.getenv("BACKFILL_END_DATE") or None
+
+        ignore_checkpoint = (
+            os.getenv("BACKFILL_IGNORE_CHECKPOINT", "false").lower()
+            == "true"
+        )
+
+        # Select files for incremental ETL or date-range backfill.
+        self.pending_objects = select_objects(
+            objects=all_objects,
+            processed=processed,
+            start_date=start_date,
+            end_date=end_date,
+            ignore_checkpoint=ignore_checkpoint,
+        )
+
+        if start_date and end_date:
+            print(
+                f"Backfill range: {start_date} to {end_date}; "
+                f"selected {len(self.pending_objects)} files."
+            )
 
         if not self.pending_objects:
-            print("No new or changed S3 files to process.")
+            print("No eligible S3 files to process.")
             return None
 
         files = []
@@ -128,7 +148,7 @@ class BronzeReader:
             files.append(str(local_file))
 
         print(
-            f"Downloaded {len(files)} new or changed files "
+            f"Downloaded {len(files)} files "
             f"from s3://{S3_BUCKET}/{S3_RAW_PREFIX}/"
         )
 
@@ -137,3 +157,4 @@ class BronzeReader:
             .schema(trade_schema)
             .json(files)
         )
+

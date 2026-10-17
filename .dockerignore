@@ -1,5 +1,6 @@
 .git
 .venv
+.env
 __pycache__
 *.pyc
 *.pyo
@@ -12,3 +13,4 @@ logs
 .git
 .gitignore
 .dockerignore
+.pytest_cache
