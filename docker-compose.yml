@@ -150,3 +150,4 @@ volumes:
   postgres_data:
   pgadmin_data:
   airflow_logs:
+  spark-events:

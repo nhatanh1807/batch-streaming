@@ -22,6 +22,7 @@ from etl.schema import trade_schema
 class BronzeReader:
 
     def __init__(self):
+        
         self.spark = (
             SparkSession.builder
             .master("local[*]")
@@ -30,8 +31,11 @@ class BronzeReader:
                 "spark.jars",
                 "/opt/jdbc/postgresql-42.7.8.jar",
             )
+            .config("spark.eventLog.enabled", "true")
+            .config("spark.eventLog.dir", "file:/opt/spark-events")
             .getOrCreate()
         )
+
 
         self.s3 = boto3.client(
             "s3",
