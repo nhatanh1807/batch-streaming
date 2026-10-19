@@ -45,6 +45,11 @@ with DAG(
                 type="bind",
                 read_only=True,
             ),
+            Mount(
+                source="spark-events",
+                target="/opt/spark-events",
+                type="volume",
+            ),
         ],
         environment={
             "POSTGRES_HOST": "postgres",

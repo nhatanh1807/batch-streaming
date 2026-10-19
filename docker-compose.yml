@@ -34,10 +34,12 @@ services:
       S3_RAW_PREFIX: raw/binance/trades
     volumes:
       - ./data:/app/data
+      - spark-events:/opt/spark-events
       - type: bind
         source: ${AWS_HOST_DIR:?Please set AWS_HOST_DIR in .env}
         target: /root/.aws
         read_only: true
+      
 
   pgadmin:
     image: dpage/pgadmin4
@@ -145,7 +147,19 @@ services:
         target: /root/.aws
         read_only: true
     command: scheduler
-
+  spark-history-server:
+    image: apache/spark:4.1.2
+    container_name: batch-streaming-spark-history
+    restart: unless-stopped
+    ports:
+      - "18080:18080"
+    volumes:
+      - spark-events:/opt/spark-events
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.history.HistoryServer
+    environment:
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=file:/opt/spark-events"
 volumes:
   postgres_data:
   pgadmin_data:
