@@ -46,7 +46,7 @@ with DAG(
                 read_only=True,
             ),
             Mount(
-                source="spark-events",
+                source="batch-streaming_spark-events",
                 target="/opt/spark-events",
                 type="volume",
             ),

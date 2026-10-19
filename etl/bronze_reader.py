@@ -34,6 +34,8 @@ class BronzeReader:
             .config("spark.eventLog.enabled", "true")
             .config("spark.eventLog.dir", "file:/opt/spark-events")
             .getOrCreate()
+            .config("spark.eventLog.enabled", "true")
+            .config("spark.eventLog.filePermissions", "644")
         )
 
 
