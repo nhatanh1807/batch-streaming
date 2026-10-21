@@ -160,6 +160,22 @@ services:
       - org.apache.spark.deploy.history.HistoryServer
     environment:
       SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=file:/opt/spark-events"
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: batch-streaming-streamlit
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: batch_streaming
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "8501:8501"
 volumes:
   postgres_data:
   pgadmin_data:
