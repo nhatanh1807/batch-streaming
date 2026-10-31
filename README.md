@@ -1,4 +1,4 @@
-# Binance Trade Batch Streaming
+﻿# Binance Trade Batch Streaming
 
 A batch streaming pipeline for Binance BTC/USDT trades. A WebSocket consumer buffers trades into JSONL files on S3; a Spark job loads new or changed files into PostgreSQL Bronze and Silver tables.
 
@@ -175,3 +175,19 @@ docker compose logs -f airflow-scheduler airflow-webserver
 | `S3_RAW_PREFIX` | `raw/binance/trades` | S3 object prefix |
 
 The 10-second `SAVE_INTERVAL` is a constant in `config/settings.py`, not an environment variable.
+
+## Available Docker Compose services
+
+| Service | Purpose | Host port / behavior |
+| --- | --- | --- |
+| `postgres` | PostgreSQL database for the pipeline | `5432` to container `5432` |
+| `etl` | Runs the Spark ETL once when invoked | One-shot; no published port |
+| `pgadmin` | PostgreSQL administration web UI | `5050` to container `80` ([http://localhost:5050](http://localhost:5050)) |
+| `consumer` | Continuously consumes Binance trades and uploads batches to S3 | Background worker; no published port |
+| `airflow-init` | Initializes Airflow's metadata database | One-shot setup job; no published port |
+| `airflow-webserver` | Airflow web UI and API | `8080` to container `8080` ([http://localhost:8080](http://localhost:8080)) |
+| `airflow-scheduler` | Schedules and launches Airflow DAG tasks | Background scheduler; no published port |
+| `spark-history-server` | Spark application history UI | `18080` to container `18080` ([http://localhost:18080](http://localhost:18080)) |
+| `streamlit` | Pipeline dashboard | `8501` to container `8501` ([http://localhost:8501](http://localhost:8501)) |
+
+Start or inspect services with `docker compose up -d <service>` and `docker compose ps`.

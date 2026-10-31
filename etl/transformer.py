@@ -1,11 +1,15 @@
-from pyspark.sql.functions import col, to_date, timestamp_millis
+from pyspark.sql.functions import (
+    col,
+    to_date,
+    timestamp_millis,
+)
 
 
 class Transformer:
 
     def transform(self, df):
 
-        return (
+        transformed_df = (
             df
             .select(
                 col("trade_id"),
@@ -33,3 +37,5 @@ class Transformer:
                 to_date(col("event_time"))
             )
         )
+
+        return transformed_df

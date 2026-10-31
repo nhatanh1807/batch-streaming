@@ -1,3 +1,4 @@
+
 from config.settings import (
     POSTGRES_HOST,
     POSTGRES_PORT,
@@ -12,6 +13,9 @@ import psycopg
 class SilverWriter:
     STAGING_TABLE = "silver.trades_staging"
     TARGET_TABLE = "silver.trades"
+
+    # Shared lock identifier for this Silver writer
+    LOCK_ID = 20261031
 
     def __init__(self):
         self.jdbc_url = (
@@ -54,8 +58,8 @@ class SilverWriter:
     def _merge_to_target(self):
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"""
-                    INSERT INTO {self.TARGET_TABLE} (
+                cur.execute("""
+                    INSERT INTO silver.trades (
                         trade_id,
                         event_time,
                         symbol,
@@ -74,34 +78,46 @@ class SilverWriter:
                         buyer_maker,
                         trade_value,
                         trade_date
-                    FROM {self.STAGING_TABLE}
+                    FROM silver.trades_staging
                     ON CONFLICT (trade_id) DO NOTHING;
                 """)
 
     def save(self, df):
-        # 1. Make sure staging table exists
         self._create_staging_table()
 
-        # 2. Clear previous staging data
-        self._clear_staging()
+        # Use a session-level lock because Spark JDBC uses
+        # a separate connection to write into staging.
+        with self._get_connection() as lock_conn:
+            with lock_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_advisory_lock(%s);",
+                    (self.LOCK_ID,),
+                )
 
-        # 3. Spark writes transformed data into staging
-        (
-            df.write
-            .format("jdbc")
-            .option("url", self.jdbc_url)
-            .option("dbtable", self.STAGING_TABLE)
-            .option("user", POSTGRES_USER)
-            .option("password", POSTGRES_PASSWORD)
-            .option("driver", "org.postgresql.Driver")
-            .mode("append")
-            .save()
-        )
+            try:
+                self._clear_staging()
 
-        # 4. Merge staging → final
-        self._merge_to_target()
+                (
+                    df.write
+                    .format("jdbc")
+                    .option("url", self.jdbc_url)
+                    .option("dbtable", self.STAGING_TABLE)
+                    .option("user", POSTGRES_USER)
+                    .option("password", POSTGRES_PASSWORD)
+                    .option("driver", "org.postgresql.Driver")
+                    .mode("append")
+                    .save()
+                )
 
-        # 5. Clean staging
-        self._clear_staging()
+                self._merge_to_target()
+                print("Silver data written to PostgreSQL")
 
-        print("Silver data written to PostgreSQL")
+            finally:
+                try:
+                    self._clear_staging()
+                finally:
+                    with lock_conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT pg_advisory_unlock(%s);",
+                            (self.LOCK_ID,),
+                        )

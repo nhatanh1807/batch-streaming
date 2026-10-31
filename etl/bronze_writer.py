@@ -8,6 +8,7 @@ from config.settings import (
 )
 
 import psycopg
+from pyspark.sql import functions as F
 
 
 class BronzeWriter:
@@ -29,24 +30,6 @@ class BronzeWriter:
             password=POSTGRES_PASSWORD,
         )
 
-    
-    def _create_staging_table(self):
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    DROP TABLE IF EXISTS bronze.trades_staging;
-
-                    CREATE TABLE bronze.trades_staging (
-                        trade_id BIGINT PRIMARY KEY,
-                        event_time_ms BIGINT NOT NULL,
-                        symbol VARCHAR(20) NOT NULL,
-                        price VARCHAR(50) NOT NULL,
-                        quantity VARCHAR(50) NOT NULL,
-                        buyer_maker BOOLEAN
-                    );
-                """)
-
-
     def _create_staging_table(self):
         with self._get_connection() as conn:
             with conn.cursor() as cur:
@@ -60,6 +43,7 @@ class BronzeWriter:
                         buyer_maker BOOLEAN
                     );
                 """)
+
     def _clear_staging(self):
         with self._get_connection() as conn:
             with conn.cursor() as cur:
@@ -91,10 +75,7 @@ class BronzeWriter:
                 """)
 
     def write(self, df):
-        self._create_staging_table()
-        self._clear_staging()
-
-        (
+        df = (
             df.select(
                 "trade_id",
                 "event_time",
@@ -105,18 +86,27 @@ class BronzeWriter:
             )
             .withColumnRenamed("event_time", "event_time_ms")
             .withColumnRenamed("is_buyer_maker", "buyer_maker")
-            .write
-            .format("jdbc")
-            .option("url", self.jdbc_url)
-            .option("dbtable", self.STAGING_TABLE)
-            .option("user", POSTGRES_USER)
-            .option("password", POSTGRES_PASSWORD)
-            .option("driver", "org.postgresql.Driver")
-            .mode("append")
-            .save()
+            .dropDuplicates(["trade_id"])
         )
 
-        self._merge_to_target()
+        self._create_staging_table()
         self._clear_staging()
 
-        print("Bronze data written to PostgreSQL")
+        try:
+            (
+                df.write
+                .format("jdbc")
+                .option("url", self.jdbc_url)
+                .option("dbtable", self.STAGING_TABLE)
+                .option("user", POSTGRES_USER)
+                .option("password", POSTGRES_PASSWORD)
+                .option("driver", "org.postgresql.Driver")
+                .mode("append")
+                .save()
+            )
+
+            self._merge_to_target()
+            print("Bronze data written to PostgreSQL")
+
+        finally:
+            self._clear_staging()
