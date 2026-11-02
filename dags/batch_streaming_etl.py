@@ -23,6 +23,8 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     schedule="*/5 * * * *",
     catchup=False,
+    max_active_runs=1,
+    max_active_tasks=1,
     default_args={
         "owner": "data-engineering",
         "retries": 2,
@@ -33,6 +35,7 @@ with DAG(
 
     run_etl = DockerOperator(
         task_id="run_spark_etl",
+        pool="etl_pipeline_pool",
         image="batch-streaming:latest",
         docker_url="unix://var/run/docker.sock",
         network_mode="batch-streaming_default",

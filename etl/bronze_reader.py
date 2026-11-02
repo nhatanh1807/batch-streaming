@@ -1,7 +1,8 @@
+
+import os
 import tempfile
 from pathlib import Path
-import os 
-from etl.object_filter import select_objects
+
 import boto3
 import psycopg
 from pyspark.sql import SparkSession
@@ -16,41 +17,52 @@ from config.settings import (
     POSTGRES_USER,
     POSTGRES_PASSWORD,
 )
+from etl.object_filter import select_objects
 from etl.schema import trade_schema
 
 
 class BronzeReader:
 
     def __init__(self):
-        
-        self.spark = (
-            SparkSession.builder
-            .master("local[*]")
-            .appName("Binance ETL")
-            .config(
-                "spark.jars",
-                "/opt/jdbc/postgresql-42.7.8.jar",
-            )
-            .config("spark.eventLog.enabled", "true")
-            .config("spark.eventLog.dir", "file:/opt/spark-events")
-            .config("spark.eventLog.enabled", "true")
-            .config("spark.eventLog.filePermissions", "644")
-            .getOrCreate()
-        )
-
-
-        self.s3 = boto3.client(
-            "s3",
-            region_name=AWS_REGION,
-        )
-
-        self.temp_dir = tempfile.TemporaryDirectory(
-            prefix="batch_streaming_s3_"
-        )
-        self.local_dir = Path(self.temp_dir.name)
-
-        # S3 objects selected for this ETL run.
+        self.spark = None
+        self.temp_dir = None
+        self.local_dir = None
         self.pending_objects = []
+
+        event_log_dir = "/opt/spark-events"
+        os.makedirs(event_log_dir, exist_ok=True)
+
+        try:
+            self.spark = (
+                SparkSession.builder
+                .master("local[*]")
+                .appName("Binance ETL")
+                .config(
+                    "spark.jars",
+                    "/opt/jdbc/postgresql-42.7.8.jar",
+                )
+                .config("spark.eventLog.enabled", "true")
+                .config(
+                    "spark.eventLog.dir",
+                    f"file:{event_log_dir}",
+                )
+                .config("spark.eventLog.filePermissions", "644")
+                .getOrCreate()
+            )
+
+            self.s3 = boto3.client(
+                "s3",
+                region_name=AWS_REGION,
+            )
+
+            self.temp_dir = tempfile.TemporaryDirectory(
+                prefix="batch_streaming_s3_"
+            )
+            self.local_dir = Path(self.temp_dir.name)
+
+        except Exception:
+            self.close()
+            raise
 
     def _get_connection(self):
         return psycopg.connect(
@@ -69,6 +81,7 @@ class BronzeReader:
                     SELECT object_key, etag
                     FROM public.etl_file_checkpoint;
                 """)
+
                 return {
                     key: etag
                     for key, etag in cur.fetchall()
@@ -98,13 +111,15 @@ class BronzeReader:
 
         return objects
 
-    
     def read(self):
-        """Download new/changed S3 objects or objects selected for backfill."""
+        """Download selected S3 objects and return a Spark DataFrame."""
+
+        if self.spark is None or self.temp_dir is None:
+            raise RuntimeError("BronzeReader is not initialized.")
+
         processed = self._get_processed_objects()
         all_objects = self._list_raw_objects()
 
-        # Backfill settings are optional.
         start_date = os.getenv("BACKFILL_START_DATE") or None
         end_date = os.getenv("BACKFILL_END_DATE") or None
 
@@ -113,7 +128,6 @@ class BronzeReader:
             == "true"
         )
 
-        # Select files for incremental ETL or date-range backfill.
         self.pending_objects = select_objects(
             objects=all_objects,
             processed=processed,
@@ -133,10 +147,16 @@ class BronzeReader:
             return None
 
         files = []
+        prefix = f"{S3_RAW_PREFIX.rstrip('/')}/"
 
         for obj in self.pending_objects:
             key = obj["object_key"]
-            prefix = f"{S3_RAW_PREFIX.rstrip('/')}/"
+
+            if not key.startswith(prefix):
+                raise ValueError(
+                    f"S3 object is outside configured prefix: {key}"
+                )
+
             relative_key = key[len(prefix):]
 
             local_file = self.local_dir / relative_key
@@ -164,3 +184,15 @@ class BronzeReader:
             .json(files)
         )
 
+    def close(self):
+        """Release Spark and temporary resources."""
+        if self.spark is not None:
+            try:
+                self.spark.catalog.clearCache()
+            finally:
+                self.spark.stop()
+                self.spark = None
+
+        if self.temp_dir is not None:
+            self.temp_dir.cleanup()
+            self.temp_dir = None

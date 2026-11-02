@@ -30,6 +30,7 @@ with DAG(
 
     run_backfill = DockerOperator(
         task_id="run_backfill_etl",
+        pool="etl_pipeline_pool",
         image="batch-streaming:latest",
         docker_url="unix://var/run/docker.sock",
         network_mode="batch-streaming_default",
@@ -41,6 +42,11 @@ with DAG(
                 target="/root/.aws",
                 type="bind",
                 read_only=True,
+            ),
+            Mount(
+                source="batch-streaming_spark-events",
+                target="/opt/spark-events",
+                type="volume",
             ),
         ],
         environment={

@@ -65,4 +65,7 @@ def select_objects(
 
         selected.append(obj)
 
-    return selected
+    return sorted(
+        selected,
+        key=lambda obj: obj["object_key"]
+    )
