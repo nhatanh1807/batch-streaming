@@ -8,3 +8,7 @@ logs/
 EOF
 .pytest_cache
 .venv-wslaudit_20261021.sqlite
+.venv-wsl
+.sqlite
+.sqlite3
+.db
