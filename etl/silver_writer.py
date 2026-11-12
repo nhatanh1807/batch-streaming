@@ -8,7 +8,8 @@ from config.settings import (
 )
 
 import psycopg
-
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
 class SilverWriter:
     STAGING_TABLE = "silver.trades_staging"
@@ -81,12 +82,51 @@ class SilverWriter:
                     FROM silver.trades_staging
                     ON CONFLICT (trade_id) DO NOTHING;
                 """)
+    def _deduplicate(self, df):
+        payload_cols = [
+            "event_time",
+            "symbol",
+            "price",
+            "quantity",
+            "buyer_maker",
+            "trade_value",
+            "trade_date",
+        ]
 
+        # Check conflicting records with the same trade_id
+        conflicts = (
+            df.groupBy("trade_id")
+            .agg(
+                F.countDistinct(
+                    F.struct(*[F.col(c) for c in payload_cols])
+                ).alias("payload_count")
+            )
+            .filter(F.col("payload_count") > 1)
+        )
+
+        conflict_count = conflicts.count()
+
+        if conflict_count > 0:
+            conflicts.show(20, truncate=False)
+            raise ValueError(
+                f"Found {conflict_count} trade_ids with conflicting payloads"
+            )
+
+        window_spec = (
+            Window
+            .partitionBy("trade_id")
+            .orderBy(F.col("event_time").desc())
+        )
+
+        return (
+            df
+            .withColumn("_row_num", F.row_number().over(window_spec))
+            .filter(F.col("_row_num") == 1)
+            .drop("_row_num")
+        )
     def save(self, df):
         self._create_staging_table()
 
-        # Use a session-level lock because Spark JDBC uses
-        # a separate connection to write into staging.
         with self._get_connection() as lock_conn:
             with lock_conn.cursor() as cur:
                 cur.execute(
@@ -96,6 +136,16 @@ class SilverWriter:
 
             try:
                 self._clear_staging()
+
+                original_count = df.count()
+
+                df = self._deduplicate(df)
+
+                deduplicated_count = df.count()
+
+                print(f"Original rows: {original_count}")
+                print(f"Rows after deduplication: {deduplicated_count}")
+                print(f"Removed duplicates: {original_count - deduplicated_count}")
 
                 (
                     df.write
