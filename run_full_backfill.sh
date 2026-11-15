@@ -8,8 +8,8 @@ set -Eeuo pipefail
 # Checkpoint-aware: ignore_checkpoint=false
 # ============================================================
 
-START_DATE="2026-10-22"
-END_DATE="2026-11-08"
+START_DATE="2026-11-08"
+END_DATE="2026-11-12"
 
 INCREMENTAL_DAG="batch_streaming_etl"
 BACKFILL_DAG="batch_streaming_backfill"
@@ -126,8 +126,8 @@ from datetime import date
 
 BUCKET = "batch-streaming-bronze"
 PREFIX = "raw/binance/trades/"
-START = date(2026, 10, 22)
-END = date(2026, 11, 8)
+START = date(2026, 11, 8)
+END = date(2026, 11, 12)
 
 session = boto3.Session(profile_name="batch-streaming")
 s3 = session.client("s3")

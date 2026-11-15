@@ -7,7 +7,7 @@ logs/
 .env
 EOF
 .pytest_cache
-.venv-wslaudit_20261021.sqlite
+audit_20261021.sqlite
 .venv-wsl
 .sqlite
 .sqlite3

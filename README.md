@@ -1,57 +1,108 @@
-﻿# Binance Trade Batch Streaming
+﻿# Batch Streaming for Binance Trades
 
-A batch streaming pipeline for Binance BTC/USDT trades. A WebSocket consumer buffers trades into JSONL files on S3; a Spark job loads new or changed files into PostgreSQL Bronze and Silver tables.
+This project builds a lightweight data pipeline for Binance BTC/USDT trade data. It consumes the live WebSocket stream, batches messages into JSONL files in S3, and loads them into PostgreSQL using a Spark-based ETL process. The repository also includes Airflow scheduling, checkpointing, and a Streamlit dashboard for monitoring the latest market activity.
+
+## Project goals
+
+- Collect real-time Binance trade events from the BTC/USDT stream
+- Buffer and persist raw trades in S3 using UTC-based partitions
+- Process new or changed files incrementally with Spark
+- Publish results into PostgreSQL Bronze and Silver layers
+- Support backfills and scheduled runs via Airflow
+- Provide a simple operational dashboard for trade monitoring
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    B["Binance BTC/USDT trade WebSocket"] --> C["Consumer<br/>in-memory batch, 10 s interval"]
-    C --> S3["S3 JSONL<br/>partitioned by UTC ingestion date"]
-    A["Airflow DAG<br/>every 5 minutes"] --> E["Spark ETL"]
-    S3 --> E
-    E --> Br["PostgreSQL Bronze<br/>bronze.trades"]
-    E --> Si["PostgreSQL Silver<br/>silver.trades"]
-    E --> Cp["PostgreSQL checkpoint<br/>public.etl_file_checkpoint"]
+    A["Binance WebSocket\nBTCUSDT trades"] --> B["Consumer\n10 second batch buffer"]
+    B --> C["S3 raw data\nJSONL files"]
+    D["Airflow DAG\n5-minute schedule"] --> E["Spark ETL pipeline"]
+    C --> E
+    E --> F["PostgreSQL bronze.trades"]
+    E --> G["PostgreSQL silver.trades"]
+    E --> H["Checkpoint table\npublic.etl_file_checkpoint"]
 ```
 
-Bronze and Silver are both built from the selected S3 files. The Silver transformation does not read back from the Bronze table.
+The Bronze layer stores raw values as loaded from S3. The Silver layer then enriches the same records with typed decimals, derived metrics, and partition keys for analysis. The Silver transformation reads the source files directly rather than re-reading Bronze data from PostgreSQL.
+
+## Repository structure
+
+- `consumer/` — WebSocket client, buffering, and S3 upload logic
+- `etl/` — S3 object selection, Spark schema, transformation, and PostgreSQL writes
+- `db/` — database connection helpers
+- `dags/` — Airflow DAG definitions for incremental and backfill processing
+- `dashboard/` — Streamlit dashboard for recent trade monitoring
+- `config/` — global settings and environment defaults
+- `sql/` — database schema setup
+- `tests/` — focused validation tests
+- `main_consumer.py` — entry point for the stream consumer
+- `main_etl.py` — entry point for the ETL run
+- `docker-compose.yml` — local orchestration for services
 
 ## Data flow
 
-1. `consumer/websocket_client.py` connects to `wss://stream.binance.com:9443/ws/btcusdt@trade`. Each trade is normalized to `trade_id`, event time in milliseconds, symbol, price, quantity, and buyer-maker flag.
-2. `consumer/consumer.py` buffers messages until the 10-second save interval. `consumer/writer.py` writes one JSON object per line and uploads a file under `raw/binance/trades/year=YYYY/month=MM/day=DD/`. These path partitions use UTC **ingestion** date.
-3. `etl/bronze_reader.py` lists JSONL files and compares each key and ETag with `public.etl_file_checkpoint`. New and changed objects are downloaded to a temporary directory and read by Spark with an explicit schema.
-4. `etl/bronze_writer.py` stores the raw values in `bronze.trades`, preserving event time as milliseconds and price/quantity as strings.
-5. `etl/transformer.py` converts event time to a timestamp and price/quantity to fixed precision decimals. It derives `trade_value = price * quantity` and `trade_date`; `etl/silver_writer.py` stores these in `silver.trades`.
-6. After both writes succeed, `etl/pipeline.py` stores the object keys and ETags as checkpoints. Replayed trade IDs are ignored at both targets by primary keys and `ON CONFLICT (trade_id) DO NOTHING`.
+1. `consumer/websocket_client.py` connects to `wss://stream.binance.com:9443/ws/btcusdt@trade`.
+2. `consumer/consumer.py` normalizes each trade into a compact record containing `trade_id`, `event_time`, `symbol`, `price`, `quantity`, and `is_buyer_maker`.
+3. `consumer/writer.py` writes each batch as one JSON object per line and uploads the file to S3 under a UTC partition such as:
 
-Checkpointing is object-level and takes place after both layer writes. The consumer's current batch is only in memory and there is no shutdown flush handler.
+```text
+raw/binance/trades/year=2026/month=10/day=21/20261021_143000_123456.jsonl
+```
 
-## Components
+4. `etl/bronze_reader.py` lists S3 objects, compares them with the checkpoint table, and downloads only new or changed files.
+5. `etl/bronze_writer.py` writes raw rows to `bronze.trades`.
+6. `etl/transformer.py` converts timestamps and numeric values into analytic types, then adds `trade_value` and `trade_date`.
+7. `etl/silver_writer.py` writes the transformed data into `silver.trades` and deduplicates conflicting records.
+8. `etl/pipeline.py` checkpoints processed S3 object keys and ETags only after both Bronze and Silver writes succeed.
 
-| Path | Role |
-| --- | --- |
-| `docker-compose.yml` | PostgreSQL, ETL, pgAdmin, consumer, and Airflow services |
-| `consumer/` | Binance connection, trade normalization, and S3 upload |
-| `etl/` | S3 file selection, Spark schema/transformation, PostgreSQL writers |
-| `dags/batch_streaming_etl.py` | Five-minute DockerOperator ETL schedule |
-| `sql/init.sql` | Creates Bronze and Silver schemas/tables (and an empty Gold schema) |
-| `config/settings.py` | Connection defaults, S3 settings, socket URL, save interval |
-| `main_consumer.py`, `main_etl.py` | Application entry points |
+## Tech stack
+
+- Python 3.11 / 3.12
+- WebSocket client: `websocket-client`
+- AWS SDK: `boto3`
+- Data processing: Apache Spark 4.1.2
+- Database: PostgreSQL 16
+- Orchestration: Docker Compose + Apache Airflow
+- Dashboard: Streamlit + Plotly
 
 ## Prerequisites
 
-- Docker Engine and Docker Compose.
-- An AWS credentials/configuration directory with a `batch-streaming` profile and permission to list, read, and write in the target S3 bucket.
-- The configured bucket (Compose default: `batch-streaming-bronze`) in `ap-southeast-1`.
-- Network access to Binance and S3.
+You need:
 
-Compose mounts `\${HOME}/.aws` read-only for the consumer and ETL. The DAG separately hard-codes `/home/alva_ngo/.aws` as the host mount source; update that path for your Docker host. The DAG also hard-codes the Docker network name `batch-streaming_default`.
+- Docker Engine and Docker Compose
+- AWS credentials for a profile such as `batch-streaming`
+- A target S3 bucket in `ap-southeast-1`
+- Internet access to Binance and Amazon S3
 
-## Setup caveats in the current repository
+The project reads AWS credentials from a mounted host directory such as `${HOME}/.aws` and expects an AWS profile configured in `AWS_PROFILE`.
 
-- The ETL reads and writes `public.etl_file_checkpoint`, but `sql/init.sql` does not create it. Create it in the `batch_streaming` database before the first ETL run:
+## Environment variables
+
+Main defaults are defined in `config/settings.py`:
+
+- `POSTGRES_HOST` — default `localhost`
+- `POSTGRES_PORT` — default `5432`
+- `POSTGRES_DB` — default `batch_streaming`
+- `POSTGRES_USER` — default `postgres`
+- `POSTGRES_PASSWORD` — default `postgres`
+- `S3_BUCKET` — default `batch-streaming-bronze`
+- `S3_RAW_PREFIX` — default `raw/binance/trades`
+- `AWS_REGION` — default `ap-southeast-1`
+- `SAVE_INTERVAL` — fixed at 10 seconds
+
+Example environment file:
+
+```env
+AWS_HOST_DIR=/home/your-user/.aws
+AWS_PROFILE=batch-streaming
+```
+
+## Database setup
+
+The repository initializes PostgreSQL schemas in `sql/init.sql`, but the checkpoint table is created separately because it is used at runtime by the ETL process.
+
+Create the checkpoint table before running ETL for the first time:
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.etl_file_checkpoint (
@@ -61,133 +112,146 @@ CREATE TABLE IF NOT EXISTS public.etl_file_checkpoint (
 );
 ```
 
-- Compose initializes PostgreSQL with database `batch_streaming`, while Airflow's SQLAlchemy connection points to a separate database named `airflow`. The Compose configuration does not create that database; Airflow initialization may fail until it is provisioned.
-- `sql/init.sql` creates a `gold` schema but the source contains no Gold table or processing step.
-- The S3 bucket and AWS profile must already exist and be accessible. The consumer and ETL use boto3 credentials from the mounted profile.
+Important notes:
+
+- Compose creates the `batch_streaming` database for the pipeline.
+- Airflow stores its metadata in a separate database named `airflow`.
+- `sql/init.sql` creates the `gold` schema but the project does not yet implement a Gold processing layer.
 
 ## Run with Docker Compose
 
 Start PostgreSQL:
 
-```sh
+```bash
 docker compose up -d postgres
 ```
 
-On first startup with a new `postgres_data` volume, the Postgres image runs `sql/init.sql`. Existing volumes are not reinitialized by later edits. Connect to database `batch_streaming` on `localhost:5432` as `postgres`, then create the checkpoint table shown above.
+Build and run the ETL once:
 
-Build the application image and run ETL once:
-
-```sh
+```bash
 docker compose build etl consumer
 docker compose run --rm etl
 ```
 
-With no unseen or changed S3 objects, the ETL reports that there are no new files and exits. Start the live consumer to begin producing files:
+Start the live consumer and let it upload batches to S3:
 
-```sh
+```bash
 docker compose up -d consumer
 docker compose logs -f consumer
 ```
 
-Stop it with `docker compose stop consumer`. The configured ETL service is a one-shot invocation of `main_etl.py`; Airflow is intended to repeat it every five minutes.
+Stop the consumer when needed:
 
-To use Airflow, first resolve the database and host-path caveats above. Then:
+```bash
+docker compose stop consumer
+```
 
-```sh
+### Airflow scheduler
+
+Launch the Airflow service stack:
+
+```bash
 docker compose up -d airflow-init airflow-webserver airflow-scheduler
 ```
 
-The webserver is published at [http://localhost:8080](http://localhost:8080). Compose configures the login as `admin` / `admin`. The DAG launches the prebuilt `batch-streaming:latest` image via DockerOperator, so build it with `docker compose build etl` first. pgAdmin is published at [http://localhost:5050](http://localhost:5050); its configured login values are in `docker-compose.yml`.
+The web UI is available at:
 
-## Run locally
+- http://localhost:8080
+- login: `admin` / `admin`
 
-The application image installs Python dependencies, Java 21, PySpark 4.1.2, and PostgreSQL JDBC driver at `/opt/jdbc/postgresql-42.7.8.jar`. For a local run, provide equivalent dependencies, AWS credentials, and PostgreSQL environment variables, then run the consumer and ETL in separate terminals:
+The repository includes:
 
-```sh
+- `batch_streaming_etl` — scheduled ETL job every 5 minutes
+- `batch_streaming_backfill` — manual backfill for specific date ranges
+
+### pgAdmin
+
+The database management UI is exposed at:
+
+- http://localhost:5050
+
+### Streamlit dashboard
+
+```bash
+docker compose up -d streamlit
+```
+
+Then open:
+
+- http://localhost:8501
+
+The dashboard connects to PostgreSQL and shows price, volume, maker/taker activity, and recent trade rows.
+
+## Local execution
+
+If you prefer to run the project without Docker, install the dependencies and start the consumer and ETL in separate terminal sessions:
+
+```bash
 python main_consumer.py
 python main_etl.py
 ```
 
-The consumer command runs continuously; the ETL command processes available new/changed objects once. Python defaults are PostgreSQL host `localhost`, port `5432`, database `batch_streaming`, and user/password `postgres`.
+The consumer keeps running in the foreground, while the ETL job processes all currently eligible S3 files once and exits.
 
-## Validate the data
+## Validation queries
 
-Run these against the `batch_streaming` database:
+Use the following SQL to inspect the data after ETL runs:
 
 ```sql
--- Recent raw Bronze rows
 SELECT trade_id, event_time_ms, symbol, price, quantity, buyer_maker, ingested_at
 FROM bronze.trades
 ORDER BY event_time_ms DESC
 LIMIT 20;
 
--- Recent typed Silver rows and derived values
 SELECT trade_id, event_time, symbol, price, quantity, trade_value, trade_date
 FROM silver.trades
 ORDER BY event_time DESC
 LIMIT 20;
 
--- Compare layer counts
 SELECT 'bronze' AS layer, COUNT(*) AS rows FROM bronze.trades
 UNION ALL
 SELECT 'silver', COUNT(*) FROM silver.trades;
 
--- Duplicate checks (expected to return no rows)
-SELECT trade_id, COUNT(*) FROM bronze.trades
-GROUP BY trade_id HAVING COUNT(*) > 1;
+SELECT trade_id, COUNT(*)
+FROM bronze.trades
+GROUP BY trade_id
+HAVING COUNT(*) > 1;
 
-SELECT trade_id, COUNT(*) FROM silver.trades
-GROUP BY trade_id HAVING COUNT(*) > 1;
+SELECT trade_id, COUNT(*)
+FROM silver.trades
+GROUP BY trade_id
+HAVING COUNT(*) > 1;
 
--- Checkpointed objects
 SELECT object_key, etag, processed_at
 FROM public.etl_file_checkpoint
 ORDER BY processed_at DESC
 LIMIT 20;
-
--- Daily trade count and notional by symbol
-SELECT trade_date, symbol, COUNT(*) AS trades, SUM(trade_value) AS notional
-FROM silver.trades
-GROUP BY trade_date, symbol
-ORDER BY trade_date DESC, symbol;
 ```
 
-Follow service logs with:
+## Useful operational scripts
 
-```sh
+- `run_full_backfill.sh` — replays a date range while respecting checkpoint state
+- `audit_s3_partition.py` — scans raw S3 files and reports duplicate or malformed records
+- `tests/` — verifies object date parsing, filter logic, and transformation behavior
+
+## Common gotchas
+
+- `public.etl_file_checkpoint` is not created by `sql/init.sql`; create it manually before the first run.
+- `AWS_HOST_DIR` must point to a valid AWS credentials directory on the host machine.
+- Backfills should usually set `BACKFILL_IGNORE_CHECKPOINT` only when you intend to reprocess historical data.
+- If Airflow is enabled, ensure the `airflow` database exists before the `airflow-init` service runs.
+
+## Logs and troubleshooting
+
+```bash
 docker compose logs -f postgres
 docker compose logs -f consumer
 docker compose logs -f etl
 docker compose logs -f airflow-scheduler airflow-webserver
 ```
 
-## Configuration
+These commands are useful for checking whether the consumer is receiving WebSocket messages, whether S3 upload batches are being created, and whether the ETL is processing the expected files.
 
-| Variable | Default / Compose value | Purpose |
-| --- | --- | --- |
-| `POSTGRES_HOST` | Python: `localhost`; Compose ETL: `postgres` | PostgreSQL host |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_DB` | `batch_streaming` | ETL database |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD` | `postgres`, `postgres` | Database credentials |
-| `AWS_PROFILE` | `batch-streaming` in Compose | boto3 profile |
-| `AWS_REGION` | `ap-southeast-1` | S3 region |
-| `S3_BUCKET` | `batch-streaming-bronze` | S3 bucket |
-| `S3_RAW_PREFIX` | `raw/binance/trades` | S3 object prefix |
+## Summary
 
-The 10-second `SAVE_INTERVAL` is a constant in `config/settings.py`, not an environment variable.
-
-## Available Docker Compose services
-
-| Service | Purpose | Host port / behavior |
-| --- | --- | --- |
-| `postgres` | PostgreSQL database for the pipeline | `5432` to container `5432` |
-| `etl` | Runs the Spark ETL once when invoked | One-shot; no published port |
-| `pgadmin` | PostgreSQL administration web UI | `5050` to container `80` ([http://localhost:5050](http://localhost:5050)) |
-| `consumer` | Continuously consumes Binance trades and uploads batches to S3 | Background worker; no published port |
-| `airflow-init` | Initializes Airflow's metadata database | One-shot setup job; no published port |
-| `airflow-webserver` | Airflow web UI and API | `8080` to container `8080` ([http://localhost:8080](http://localhost:8080)) |
-| `airflow-scheduler` | Schedules and launches Airflow DAG tasks | Background scheduler; no published port |
-| `spark-history-server` | Spark application history UI | `18080` to container `18080` ([http://localhost:18080](http://localhost:18080)) |
-| `streamlit` | Pipeline dashboard | `8501` to container `8501` ([http://localhost:8501](http://localhost:8501)) |
-
-Start or inspect services with `docker compose up -d <service>` and `docker compose ps`.
+This repository demonstrates a practical batch-streaming pipeline for market data: ingest from a live exchange stream, persist raw files in S3, process with Spark, land results in PostgreSQL, and monitor the pipeline with Airflow and a lightweight dashboard.
