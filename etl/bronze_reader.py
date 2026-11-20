@@ -23,13 +23,18 @@ from etl.schema import trade_schema
 
 class BronzeReader:
 
-    def __init__(self):
+    def __init__(
+            self, 
+            checkpoint_table="public.etl_file_checkpoint",
+        ):
         self.spark = None
         self.temp_dir = None
         self.local_dir = None
         self.pending_objects = []
 
-        event_log_dir = "/opt/spark-events"
+        event_log_dir = str(
+            Path(tempfile.gettempdir()) / "spark-events"
+        )
         os.makedirs(event_log_dir, exist_ok=True)
 
         try:
@@ -74,18 +79,28 @@ class BronzeReader:
         )
 
     def _get_processed_objects(self):
-        """Return previously processed S3 object keys and ETags."""
+        """Return processed S3 object keys and ETags."""
+
+        allowed_tables = {
+            "public.etl_file_checkpoint",
+            "public.bronze_silver_checkpoint",
+        }
+
+        if self.checkpoint_table not in allowed_tables:
+            raise ValueError(
+                f"Unsupported checkpoint table: {self.checkpoint_table}"
+            )
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(
+                    f"""
                     SELECT object_key, etag
-                    FROM public.etl_file_checkpoint;
-                """)
+                    FROM {self.checkpoint_table};
+                    """
+                )
 
-                return {
-                    key: etag
-                    for key, etag in cur.fetchall()
-                }
+                return dict(cur.fetchall())
 
     def _list_raw_objects(self):
         """List JSONL objects under the configured S3 prefix."""
