@@ -24,9 +24,10 @@ from etl.schema import trade_schema
 class BronzeReader:
 
     def __init__(
-            self, 
+            self,
             checkpoint_table="public.etl_file_checkpoint",
         ):
+        self.checkpoint_table = checkpoint_table
         self.spark = None
         self.temp_dir = None
         self.local_dir = None
@@ -42,10 +43,10 @@ class BronzeReader:
                 SparkSession.builder
                 .master("local[*]")
                 .appName("Binance ETL")
-                .config(
-                    "spark.jars",
-                    "/opt/jdbc/postgresql-42.7.8.jar",
-                )
+                # .config(
+                #     "spark.jars",
+                #     "/opt/jdbc/postgresql-42.7.8.jar",
+                # )
                 .config("spark.eventLog.enabled", "true")
                 .config(
                     "spark.eventLog.dir",
